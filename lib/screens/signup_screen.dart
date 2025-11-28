@@ -19,11 +19,7 @@ class _SignupScreenState extends State<SignupScreen> {
         email: _email.text.trim(),
         password: _password.text,
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Check your email for confirmation link!')),
-        );
-      }
+      Navigator.pop(context);  // Pop back to auth handler (it will show Home if logged in)
     } on AuthException catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     } finally {

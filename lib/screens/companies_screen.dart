@@ -1,83 +1,212 @@
-// lib/screens/companies_screen.dart — полностью рабочий код
+// lib/screens/companies_screen.dart
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class CompaniesScreen extends StatefulWidget {
   const CompaniesScreen({super.key});
-  @override State<CompaniesScreen> createState() => _CompaniesScreenState();
+  @override
+  State<CompaniesScreen> createState() => _CompaniesScreenState();
 }
 
 class _CompaniesScreenState extends State<CompaniesScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _descController = TextEditingController();
-
-  List<Map<String, dynamic>> _users = [];
-  String? _selectedManagerId;
-  bool _loading = false;
-  bool _fetchingUsers = true;
+  List<Map<String, dynamic>> companies = [];
+  bool loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadUsers();
+    
+    loadCompanies();
   }
 
-  Future<void> _loadUsers() async {
-    final response = await Supabase.instance.client
-        .from('profiles')
-        .select('id, email')
-        .order('email');
+  Future<void> loadCompanies() async {
+    setState(() => loading = true);
+    try {
+      final data = await Supabase.instance.client
+      .from('companies')
+      .select('id, name, description, company_managers!company_id(profiles(email, id))');
 
-    setState(() {
-      _users = List<Map<String, dynamic>>.from(response);
-      _fetchingUsers = false;
-    });
+      setState(() {
+        companies = List<Map<String, dynamic>>.from(data);
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e')));
+      }
+      setState(() => loading = false);
+    }
   }
 
-  Future<void> _createCompany() async {
-    if (!_formKey.currentState!.validate() || _selectedManagerId == null) {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Компании')),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.add),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const CompanyFormScreen()),
+          ).then((_) => loadCompanies());
+        },
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : companies.isEmpty
+              ? const Center(child: Text('Нет компаний'))
+              : ListView.builder(
+                  itemCount: companies.length,
+                  itemBuilder: (context, i) {
+                    final c = companies[i];
+                   final managerEmail = (c['company_managers'] as Map<String, dynamic>?)
+                          ?['profiles']?['email'] as String? ??
+                      '—';
+
+                    return ListTile(
+                      title: Text(c['name'] ?? 'Без названия'),
+                      subtitle: Text('Менеджер: $managerEmail'),
+                      trailing: const Icon(Icons.arrow_forward_ios),
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => CompanyFormScreen(company: c),
+                          ),
+                        ).then((_) => loadCompanies());
+                      },
+                    );
+                  },
+                ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Форма создания и редактирования компании
+// ──────────────────────────────────────────────────────────────
+class CompanyFormScreen extends StatefulWidget {
+  final Map<String, dynamic>? company;
+  const CompanyFormScreen({super.key, this.company});
+
+  @override
+  State<CompanyFormScreen> createState() => _CompanyFormScreenState();
+}
+
+class _CompanyFormScreenState extends State<CompanyFormScreen> {
+  final _nameCtrl = TextEditingController();
+  final _descCtrl = TextEditingController();
+  String? _selectedManagerId;
+  List<Map<String, dynamic>> users = [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _nameCtrl.text = widget.company?['name'] ?? '';
+    _descCtrl.text = widget.company?['description'] ?? '';
+
+    // Правильное получение ID менеджера (работает и с Map, и с List)
+    final managerData = widget.company?['company_managers'];
+
+    if (managerData is Map<String, dynamic>) {
+      // Новый формат — один объект
+      _selectedManagerId = managerData['profiles']?['id'] as String?;
+    } else if (managerData is List && managerData.isNotEmpty) {
+      // Старый формат — массив
+      _selectedManagerId = managerData[0]['profiles']?['id'] as String?;
+    }
+
+    loadUsers();
+  }
+
+  Future<void> loadUsers() async {
+    try {
+      final res = await Supabase.instance.client
+          .from('profiles')
+          .select('id, email')
+          .order('email');
+
+      setState(() {
+        users = List<Map<String, dynamic>>.from(res);
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Ошибка загрузки пользователей: $e')));
+      }
+    }
+  }
+
+  Future<void> save() async {
+    if (_nameCtrl.text.trim().isEmpty || _selectedManagerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Выберите менеджера компании')),
+        const SnackBar(content: Text('Заполните название и выберите менеджера')),
       );
       return;
     }
 
-    setState(() => _loading = true);
     try {
-      // 1. Создаём компанию
-      final companyRes = await Supabase.instance.client
-          .from('companies')
-          .insert({
-            'name': _nameController.text.trim(),
-            'description': _descController.text.trim(),
-            'created_by': Supabase.instance.client.auth.currentUser!.id,
-          })
-          .select()
-          .single();
+      final client = Supabase.instance.client;
+      final currentUserId = Supabase.instance.client.auth.currentUser!.id;
 
-      final companyId = companyRes['id'];
+      if (widget.company == null) {
+        // === СОЗДАНИЕ ===
+        final companyRes = await client
+            .from('companies')
+            .insert({
+              'name': _nameCtrl.text.trim(),
+              'description': _descCtrl.text.trim(),
+              'created_by': currentUserId,   // ЭТА СТРОКА РЕШАЕТ ВСЁ
+            })
+            .select('id')
+            .single();
 
-      // 2. Назначаем менеджера
-      await Supabase.instance.client.from('company_managers').insert({
-        'user_id': _selectedManagerId,
-        'company_id': companyId,
-      });
+        await client.from('company_managers').insert({
+          'user_id': _selectedManagerId,
+          'company_id': companyRes['id'], // ← исправлено: было company['id']
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Компания создана и менеджер назначен!')),
-      );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Компания создана!')),
+          );
+        }
+      } else {
+        // === РЕДАКТИРОВАНИЕ ===
+        await client.from('companies').update({
+          'name': _nameCtrl.text.trim(),
+          'description': _descCtrl.text.trim(),
+        }).eq('id', widget.company!['id']);
 
-      // Очистка формы
-      _nameController.clear();
-      _descController.clear();
-      setState(() => _selectedManagerId = null);
+        // Полная замена менеджера
+        await client
+            .from('company_managers')
+            .delete()
+            .eq('company_id', widget.company!['id']);
+
+        await client.from('company_managers').insert({
+          'user_id': _selectedManagerId,
+          'company_id': widget.company!['id'],
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Компания обновлена!')),
+          );
+        }
+      }
+
+      if (mounted) Navigator.pop(context);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e')),
-      );
-    } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ошибка: $e')),
+        );
+      }
     }
   }
 
@@ -85,67 +214,59 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Companies'),
-        backgroundColor: Colors.green.shade600,
-        foregroundColor: Colors.white,
+        title: Text(widget.company == null ? 'Новая компания' : 'Редактировать компанию'),
       ),
       body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              TextFormField(
-                controller: _nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Название компании *',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (v) => v!.trim().isEmpty ? 'Обязательно' : null,
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          children: [
+            TextField(
+              controller: _nameCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Название компании',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _descController,
-                decoration: const InputDecoration(
-                  labelText: 'Описание',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 3,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _descCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Описание',
+                border: OutlineInputBorder(),
               ),
-              const SizedBox(height: 20),
-              const Text('Выберите менеджера компании:', style: TextStyle(fontSize: 16)),
-              const SizedBox(height: 8),
-              _fetchingUsers
-                  ? const Center(child: CircularProgressIndicator())
-                  : DropdownButtonFormField<String>(
-                      value: _selectedManagerId,
-                      hint: const Text('— Выберите пользователя —'),
-                      isExpanded: true,
-                      items: _users.map<DropdownMenuItem<String>>((user) {
-                        return DropdownMenuItem<String>(
-                          value: user['id'] as String,
-                          child: Text(user['email'] as String),
-                        );
-                      }).toList(),
-                      onChanged: (val) => setState(() => _selectedManagerId = val),
-                      validator: (v) => v == null ? 'Выберите менеджера' : null,
+              maxLines: 3,
+            ),
+            const SizedBox(height: 20),
+            loading
+                ? const CircularProgressIndicator()
+                : DropdownButtonFormField<String>(
+                    value: _selectedManagerId,
+                    hint: const Text('Выберите менеджера'),
+                    decoration: const InputDecoration(
+                      labelText: 'Менеджер',
+                      border: OutlineInputBorder(),
                     ),
-              const SizedBox(height: 32),
-              SizedBox(
-                height: 56,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : _createCompany,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade600,
-                    foregroundColor: Colors.white,
+                    items: users.map<DropdownMenuItem<String>>((u) {
+                      return DropdownMenuItem<String>(
+                        value: u['id'] as String,
+                        child: Text(u['email'] as String),
+                      );
+                    }).toList(),
+                    onChanged: (String? value) {
+                      setState(() {
+                        _selectedManagerId = value;
+                      });
+                    },
                   ),
-                  child: _loading
-                      ? const CircularProgressIndicator(color: Colors.white)
-                      : const Text('Создать компанию', style: TextStyle(fontSize: 18)),
-                ),
+            const SizedBox(height: 30),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: save,
+                child: const Text('Сохранить'),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

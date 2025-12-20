@@ -43,6 +43,7 @@ dependencies:
   image_picker: ^1.2.1
   flutter_map: ^8.2.2
   latlong2: ^0.9.1
+  shared_preferences: ^2.5.3
 
 assets:
   - assets/g-logo.png

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'company_branches_screen.dart';
+import '../../services/admin_logger.dart';
 
 class CompaniesScreen extends StatefulWidget {
   const CompaniesScreen({super.key});
@@ -18,7 +19,7 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
   @override
   void initState() {
     super.initState();
-    
+
     loadCompanies();
   }
 
@@ -26,8 +27,8 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
     setState(() => loading = true);
     try {
       final data = await Supabase.instance.client
-      .from('companies')
-      .select('id, name, description, company_managers!company_id(profiles(email, id))');
+          .from('companies')
+          .select('id, name, description, discount_percentage, logo_url');
 
       setState(() {
         companies = List<Map<String, dynamic>>.from(data);
@@ -35,8 +36,9 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Ошибка загрузки: $e')));
       }
       setState(() => loading = false);
     }
@@ -55,33 +57,38 @@ class _CompaniesScreenState extends State<CompaniesScreen> {
           ).then((_) => loadCompanies());
         },
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : companies.isEmpty
+      body:
+          loading
+              ? const Center(child: CircularProgressIndicator())
+              : companies.isEmpty
               ? const Center(child: Text('Нет компаний'))
               : ListView.builder(
-                  itemCount: companies.length,
-                  itemBuilder: (context, i) {
-                    final c = companies[i];
-                   final managerEmail = (c['company_managers'] as Map<String, dynamic>?)
-                          ?['profiles']?['email'] as String? ??
-                      '—';
+                itemCount: companies.length,
+                itemBuilder: (context, i) {
+                  final c = companies[i];
+                  final discount = c['discount_percentage'] ?? 0;
 
-                    return ListTile(
-                      title: Text(c['name'] ?? 'Без названия'),
-                      subtitle: Text('Менеджер: $managerEmail'),
-                      trailing: const Icon(Icons.arrow_forward_ios),
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => CompanyFormScreen(company: c),
-                          ),
-                        ).then((_) => loadCompanies());
-                      },
-                    );
-                  },
-                ),
+                  return ListTile(
+                    leading:
+                        c['logo_url'] != null
+                            ? CircleAvatar(
+                              backgroundImage: NetworkImage(c['logo_url']),
+                            )
+                            : const CircleAvatar(child: Icon(Icons.store)),
+                    title: Text(c['name'] ?? 'Без названия'),
+                    subtitle: Text('Скидка: $discount%'),
+                    trailing: const Icon(Icons.arrow_forward_ios),
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CompanyFormScreen(company: c),
+                        ),
+                      ).then((_) => loadCompanies());
+                    },
+                  );
+                },
+              ),
     );
   }
 }
@@ -101,9 +108,7 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
   final _nameCtrl = TextEditingController();
   final _descCtrl = TextEditingController();
   final _discountCtrl = TextEditingController();
-  String? _selectedManagerId;
-  List<Map<String, dynamic>> users = [];
-  bool loading = true;
+  bool loading = false;
   File? _logoFile;
   String? _logoUrl;
 
@@ -113,21 +118,9 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
 
     _nameCtrl.text = widget.company?['name'] ?? '';
     _descCtrl.text = widget.company?['description'] ?? '';
-    _discountCtrl.text = (widget.company?['discount_percentage'] ?? 0).toString();
+    _discountCtrl.text =
+        (widget.company?['discount_percentage'] ?? 0).toString();
     _logoUrl = widget.company?['logo_url'];
-
-    // Правильное получение ID менеджера (работает и с Map, и с List)
-    final managerData = widget.company?['company_managers'];
-
-    if (managerData is Map<String, dynamic>) {
-      // Новый формат — один объект
-      _selectedManagerId = managerData['profiles']?['id'] as String?;
-    } else if (managerData is List && managerData.isNotEmpty) {
-      // Старый формат — массив
-      _selectedManagerId = managerData[0]['profiles']?['id'] as String?;
-    }
-
-    loadUsers();
   }
 
   Future<void> _pickLogo() async {
@@ -144,47 +137,33 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
     if (_logoFile == null) return _logoUrl;
     try {
       final fileExt = _logoFile!.path.split('.').last;
-      final fileName = '$companyId/logo_${DateTime.now().millisecondsSinceEpoch}.$fileExt';
+      final fileName =
+          '$companyId/logo_${DateTime.now().millisecondsSinceEpoch}.$fileExt';
       await Supabase.instance.client.storage
           .from('company_logos')
           .upload(fileName, _logoFile!);
-      
+
       final imageUrl = Supabase.instance.client.storage
           .from('company_logos')
           .getPublicUrl(fileName);
       return imageUrl;
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ошибка загрузки лого: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка загрузки лого: $e')));
       return null;
     }
   }
 
-  Future<void> loadUsers() async {
-    try {
-      final res = await Supabase.instance.client
-          .from('profiles')
-          .select('id, email')
-          .order('email');
-
-      setState(() {
-        users = List<Map<String, dynamic>>.from(res);
-        loading = false;
-      });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Ошибка загрузки пользователей: $e')));
-      }
-    }
-  }
-
   Future<void> save() async {
-    if (_nameCtrl.text.trim().isEmpty || _selectedManagerId == null) {
+    if (_nameCtrl.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Заполните название и выберите менеджера')),
+        const SnackBar(content: Text('Заполните название компании')),
       );
       return;
     }
+
+    setState(() => loading = true);
 
     try {
       final client = Supabase.instance.client;
@@ -193,77 +172,139 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
 
       if (widget.company == null) {
         // === СОЗДАНИЕ ===
-        final companyRes = await client
-            .from('companies')
-            .insert({
-              'name': _nameCtrl.text.trim(),
-              'description': _descCtrl.text.trim(),
-              'discount_percentage': discount,
-              'created_by': currentUserId,   // ЭТА СТРОКА РЕШАЕТ ВСЁ
-            })
-            .select('id')
-            .single();
-        
+        final companyRes =
+            await client
+                .from('companies')
+                .insert({
+                  'name': _nameCtrl.text.trim(),
+                  'description': _descCtrl.text.trim(),
+                  'discount_percentage': discount,
+                  'created_by': currentUserId,
+                })
+                .select('id')
+                .single();
+
         final newCompanyId = companyRes['id'];
-        
+
         // Upload logo if exists
         if (_logoFile != null) {
-           final url = await _uploadLogo(newCompanyId);
-           if (url != null) {
-             await client.from('companies').update({'logo_url': url}).eq('id', newCompanyId);
-           }
+          final url = await _uploadLogo(newCompanyId);
+          if (url != null) {
+            await client
+                .from('companies')
+                .update({'logo_url': url})
+                .eq('id', newCompanyId);
+          }
         }
 
-        await client.from('company_managers').insert({
-          'user_id': _selectedManagerId,
-          'company_id': newCompanyId, // ← исправлено: было company['id']
-        });
+        await AdminLogger.log(
+          'create_company',
+          'Создана компания: ${_nameCtrl.text}',
+        );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Компания создана!')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Компания создана!')));
         }
       } else {
         // === РЕДАКТИРОВАНИЕ ===
         final companyId = widget.company!['id'];
         String? newLogoUrl = _logoUrl;
-        
+
         if (_logoFile != null) {
-           newLogoUrl = await _uploadLogo(companyId);
+          newLogoUrl = await _uploadLogo(companyId);
         }
 
-        await client.from('companies').update({
-          'name': _nameCtrl.text.trim(),
-          'description': _descCtrl.text.trim(),
-          'discount_percentage': discount,
-          'logo_url': newLogoUrl,
-        }).eq('id', companyId);
-
-        // Полная замена менеджера
         await client
-            .from('company_managers')
-            .delete()
-            .eq('company_id', companyId);
+            .from('companies')
+            .update({
+              'name': _nameCtrl.text.trim(),
+              'description': _descCtrl.text.trim(),
+              'discount_percentage': discount,
+              'logo_url': newLogoUrl,
+            })
+            .eq('id', companyId);
 
-        await client.from('company_managers').insert({
-          'user_id': _selectedManagerId,
-          'company_id': companyId,
-        });
+        await AdminLogger.log(
+          'update_company',
+          'Обновлена компания: ${_nameCtrl.text}',
+        );
 
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Компания обновлена!')),
-          );
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Компания обновлена!')));
         }
       }
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Ошибка: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => loading = false);
+    }
+  }
+
+  Future<void> _deleteCompany() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder:
+          (ctx) => AlertDialog(
+            title: const Text('Удалить компанию?'),
+            content: const Text(
+              'Внимание! Все филиалы этой компании также будут удалены.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Отмена'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Удалить',
+                  style: TextStyle(color: Colors.red),
+                ),
+              ),
+            ],
+          ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => loading = true);
+    try {
+      final companyId = widget.company!['id'];
+      final companyName = widget.company!['name'];
+
+      // 1. Delete branches first (Manual Cascade for safety)
+      await Supabase.instance.client
+          .from('company_branches')
+          .delete()
+          .eq('company_id', companyId);
+
+      // 2. Delete company
+      await Supabase.instance.client
+          .from('companies')
+          .delete()
+          .eq('id', companyId);
+
+      await AdminLogger.log('delete_company', 'Удалена компания: $companyName');
+
+      if (mounted) {
+        Navigator.pop(context); // Close form
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Ошибка удаления: $e')));
+        setState(() => loading = false);
       }
     }
   }
@@ -272,7 +313,16 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.company == null ? 'Новая компания' : 'Редактировать компанию'),
+        title: Text(
+          widget.company == null ? 'Новая компания' : 'Редактировать компанию',
+        ),
+        actions: [
+          if (widget.company != null)
+            IconButton(
+              icon: const Icon(Icons.delete, color: Colors.red),
+              onPressed: loading ? null : _deleteCompany,
+            ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -283,12 +333,15 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
                 onTap: _pickLogo,
                 child: CircleAvatar(
                   radius: 40,
-                  backgroundImage: _logoFile != null 
-                    ? FileImage(_logoFile!) 
-                    : (_logoUrl != null ? NetworkImage(_logoUrl!) : null) as ImageProvider?,
-                  child: (_logoFile == null && _logoUrl == null) 
-                    ? const Icon(Icons.add_a_photo) 
-                    : null,
+                  backgroundImage:
+                      _logoFile != null
+                          ? FileImage(_logoFile!)
+                          : (_logoUrl != null ? NetworkImage(_logoUrl!) : null)
+                              as ImageProvider?,
+                  child:
+                      (_logoFile == null && _logoUrl == null)
+                          ? const Icon(Icons.add_a_photo)
+                          : null,
                 ),
               ),
               const SizedBox(height: 10),
@@ -321,28 +374,6 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-              loading
-                  ? const CircularProgressIndicator()
-                  : DropdownButtonFormField<String>(
-                      value: _selectedManagerId,
-                      hint: const Text('Выберите менеджера'),
-                      decoration: const InputDecoration(
-                        labelText: 'Менеджер',
-                        border: OutlineInputBorder(),
-                      ),
-                      items: users.map<DropdownMenuItem<String>>((u) {
-                        return DropdownMenuItem<String>(
-                          value: u['id'] as String,
-                          child: Text(u['email'] as String),
-                        );
-                      }).toList(),
-                      onChanged: (String? value) {
-                        setState(() {
-                          _selectedManagerId = value;
-                        });
-                      },
-                    ),
-              const SizedBox(height: 20),
               if (widget.company != null)
                 OutlinedButton.icon(
                   icon: const Icon(Icons.map),
@@ -351,7 +382,10 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => CompanyBranchesScreen(companyId: widget.company!['id']),
+                        builder:
+                            (_) => CompanyBranchesScreen(
+                              companyId: widget.company!['id'],
+                            ),
                       ),
                     );
                   },
@@ -360,8 +394,15 @@ class _CompanyFormScreenState extends State<CompanyFormScreen> {
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
-                  onPressed: save,
-                  child: const Text('Сохранить'),
+                  onPressed: loading ? null : save,
+                  child:
+                      loading
+                          ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                          : const Text('Сохранить'),
                 ),
               ),
             ],

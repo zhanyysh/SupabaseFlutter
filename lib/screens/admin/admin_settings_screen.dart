@@ -1,15 +1,49 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../services/theme_service.dart';
+import '../login_screen.dart';
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final themeService = ThemeService();
+
     return Scaffold(
       appBar: AppBar(title: const Text('Настройки')),
       body: ListView(
         children: [
+          // Theme Section
+          ListTile(
+            leading: const Icon(Icons.brightness_6),
+            title: const Text('Тема оформления'),
+            subtitle: Text(_getThemeName(themeService.themeMode)),
+            trailing: DropdownButton<ThemeMode>(
+              value: themeService.themeMode,
+              underline: const SizedBox(),
+              onChanged: (ThemeMode? newValue) {
+                if (newValue != null) {
+                  themeService.updateTheme(newValue);
+                }
+              },
+              items: const [
+                DropdownMenuItem(
+                  value: ThemeMode.system,
+                  child: Text('Системная'),
+                ),
+                DropdownMenuItem(
+                  value: ThemeMode.light,
+                  child: Text('Светлая'),
+                ),
+                DropdownMenuItem(
+                  value: ThemeMode.dark,
+                  child: Text('Темная'),
+                ),
+              ],
+            ),
+          ),
+          const Divider(),
           ListTile(
             leading: const Icon(Icons.person),
             title: const Text('Профиль'),
@@ -24,10 +58,29 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.logout, color: Colors.red),
             title: const Text('Выйти', style: TextStyle(color: Colors.red)),
-            onTap: () => Supabase.instance.client.auth.signOut(),
+            onTap: () async {
+              await Supabase.instance.client.auth.signOut();
+              if (context.mounted) {
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              }
+            },
           ),
         ],
       ),
     );
+  }
+
+  String _getThemeName(ThemeMode mode) {
+    switch (mode) {
+      case ThemeMode.system:
+        return 'Системная';
+      case ThemeMode.light:
+        return 'Светлая';
+      case ThemeMode.dark:
+        return 'Темная';
+    }
   }
 }

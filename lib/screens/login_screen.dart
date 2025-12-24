@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'signup_screen.dart';
+import 'phone_auth_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -299,6 +300,38 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
                 label: Text(
                   'Войти через Google',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: theme.colorScheme.onSurface,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Phone Sign In Button
+              OutlinedButton.icon(
+                onPressed:
+                    _loading
+                        ? null
+                        : () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const PhoneAuthScreen(),
+                          ),
+                        ),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  side: BorderSide(color: theme.colorScheme.outline),
+                ),
+                icon: Icon(
+                  Icons.phone_android_rounded,
+                  color: theme.colorScheme.onSurface,
+                ),
+                label: Text(
+                  'Войти по номеру телефона',
                   style: TextStyle(
                     fontSize: 16,
                     color: theme.colorScheme.onSurface,

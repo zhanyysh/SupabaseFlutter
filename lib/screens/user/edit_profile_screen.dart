@@ -11,6 +11,7 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
+  final _phoneController = TextEditingController();
   bool _loading = false;
   bool _isGoogleUser = false;
 
@@ -24,6 +25,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -50,6 +52,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         setState(() {
           _nameController.text = name;
           _emailController.text = user.email ?? '';
+          _phoneController.text = user.phone ?? '';
           _isGoogleUser = user.appMetadata['provider'] == 'google';
         });
       }
@@ -64,10 +67,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
       final newName = _nameController.text.trim();
       final newEmail = _emailController.text.trim();
+      final newPhone = _phoneController.text.trim();
 
-      // 1. Обновляем Auth User (metadata и email)
+      // 1. Обновляем Auth User (metadata, email и phone)
       final updates = UserAttributes(
         email: (newEmail != user.email && !_isGoogleUser) ? newEmail : null,
+        phone: (newPhone != user.phone) ? newPhone : null,
         data: {'name': newName},
       );
 
@@ -76,6 +81,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       // 2. Обновляем таблицу profiles
       final profileUpdates = <String, dynamic>{
         'full_name': newName,
+        'phone': newPhone,
       };
       
       if (newEmail != user.email && !_isGoogleUser) {
@@ -88,11 +94,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           .eq('id', user.id);
 
       // 3. Показываем результат
-      if (newEmail != user.email && !_isGoogleUser) {
+      if ((newEmail != user.email && !_isGoogleUser) || (newPhone != user.phone)) {
         if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Email обновлен. Пожалуйста, подтвердите новый email.'),
+              content: Text('Данные обновлены. Может потребоваться подтверждение.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -199,6 +205,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 helperText: _isGoogleUser
                     ? 'Email управляется через Google аккаунт'
                     : 'При изменении email потребуется подтверждение',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                filled: true,
+                fillColor: isDark
+                    ? theme.colorScheme.surfaceContainerHighest
+                    : Colors.grey.shade50,
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Phone Field
+            TextField(
+              controller: _phoneController,
+              keyboardType: TextInputType.phone,
+              decoration: InputDecoration(
+                labelText: 'Номер телефона',
+                prefixIcon: const Icon(Icons.phone_outlined),
+                helperText: 'Используется для входа',
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                 ),

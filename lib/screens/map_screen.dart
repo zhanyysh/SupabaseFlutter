@@ -21,6 +21,7 @@ class _MapScreenState extends State<MapScreen> {
   final MapController _mapController = MapController();
   LatLng? _currentPosition;
   final FocusNode _searchFocusNode = FocusNode();
+  bool _isMapReady = false;
 
   // StreamController не нужен, так как mapController имеет свой стрим событий
 
@@ -228,7 +229,9 @@ class _MapScreenState extends State<MapScreen> {
             lastPosition.longitude,
           );
         });
-        _mapController.move(_currentPosition!, 15);
+        if (_isMapReady) {
+          _mapController.move(_currentPosition!, 15);
+        }
       }
 
       // Затем пробуем получить точную позицию
@@ -240,7 +243,9 @@ class _MapScreenState extends State<MapScreen> {
         setState(() {
           _currentPosition = LatLng(position.latitude, position.longitude);
         });
-        _mapController.move(_currentPosition!, 15);
+        if (_isMapReady) {
+          _mapController.move(_currentPosition!, 15);
+        }
       }
     } catch (e) {
       print("Error getting location: $e");
@@ -307,7 +312,9 @@ class _MapScreenState extends State<MapScreen> {
       floatingActionButton: FloatingActionButton(
         onPressed: () {
           if (_currentPosition != null) {
-            _mapController.move(_currentPosition!, 15);
+            if (_isMapReady) {
+              _mapController.move(_currentPosition!, 15);
+            }
           } else {
             _determinePosition();
           }
@@ -321,9 +328,15 @@ class _MapScreenState extends State<MapScreen> {
                 children: [
                   FlutterMap(
                     mapController: _mapController,
-                    options: const MapOptions(
+                    options: MapOptions(
+                      onMapReady: () {
+                        _isMapReady = true;
+                        if (_currentPosition != null) {
+                          _mapController.move(_currentPosition!, 15);
+                        }
+                      },
                       // Центр карты: Бишкек, Кыргызстан
-                      initialCenter: LatLng(42.8746, 74.5698),
+                      initialCenter: const LatLng(42.8746, 74.5698),
                       initialZoom: 12,
                       maxZoom:
                           18.4, // Увеличиваем зум, чтобы было видно детали как в 2ГИС
@@ -828,6 +841,15 @@ class _BranchDetailsSheetState extends State<BranchDetailsSheet> {
                 ),
               ),
 
+              const SizedBox(height: 20),
+              const Divider(),
+              const Text(
+                'Отзывы',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              _ReviewsSection(branchId: widget.branch['id']),
+
               const SizedBox(height: 30),
               Row(
                 children: [
@@ -875,6 +897,178 @@ class _BranchDetailsSheetState extends State<BranchDetailsSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+class _ReviewsSection extends StatefulWidget {
+  final String branchId;
+
+  const _ReviewsSection({required this.branchId});
+
+  @override
+  State<_ReviewsSection> createState() => _ReviewsSectionState();
+}
+
+class _ReviewsSectionState extends State<_ReviewsSection> {
+  final TextEditingController _commentController = TextEditingController();
+  List<Map<String, dynamic>> _reviews = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReviews();
+  }
+
+  Future<void> _loadReviews() async {
+    try {
+      final data = await Supabase.instance.client
+          .from('branch_reviews')
+          .select('*, profiles:user_id(email, avatar_url)')
+          .eq('branch_id', widget.branchId)
+          .order('created_at', ascending: false);
+      
+      if (mounted) {
+        setState(() {
+          _reviews = List<Map<String, dynamic>>.from(data);
+          _loading = false;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _error = e.toString();
+        });
+      }
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Войдите, чтобы оставить отзыв')),
+      );
+      return;
+    }
+
+    if (_commentController.text.trim().isEmpty) return;
+
+    // Optimistic update (optional, but good for UX)
+    // For now, just show loading or clear immediately
+    FocusScope.of(context).unfocus(); // Hide keyboard
+
+    try {
+      await Supabase.instance.client.from('branch_reviews').insert({
+        'branch_id': widget.branchId,
+        'user_id': user.id,
+        'comment': _commentController.text.trim(),
+        'rating': 5,
+      });
+
+      _commentController.clear();
+      await _loadReviews(); // Reload to show the new review
+
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Отзыв опубликован')));
+      }
+    } catch (e) {
+      print('Error adding review: $e');
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Ошибка: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Text(
+          'Ошибка загрузки отзывов: $_error',
+          style: const TextStyle(color: Colors.red),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Column(
+        children: [
+          // Input field
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _commentController,
+                  decoration: const InputDecoration(
+                    hintText: 'Напишите отзыв...',
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 5,
+                    ),
+                  ),
+                  onSubmitted: (_) => _addReview(),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.send, color: Colors.blue),
+                onPressed: _addReview,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          // Reviews list
+          if (_reviews.isEmpty)
+            const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Text('Нет отзывов', style: TextStyle(color: Colors.grey)),
+            )
+          else
+            ListView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: _reviews.length,
+              itemBuilder: (context, index) {
+                final review = _reviews[index];
+                final profile = review['profiles'] as Map<String, dynamic>?;
+                final email = profile?['email'] as String? ?? 'Аноним';
+                final avatarUrl = profile?['avatar_url'] as String?;
+                final comment = review['comment'] as String? ?? '';
+                final date = DateTime.parse(review['created_at']).toLocal();
+
+                return ListTile(
+                  leading: CircleAvatar(
+                    backgroundImage:
+                        avatarUrl != null ? NetworkImage(avatarUrl) : null,
+                    child: avatarUrl == null ? const Icon(Icons.person) : null,
+                  ),
+                  title: Text(email.split('@')[0]),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(comment),
+                      Text(
+                        '${date.day}.${date.month}.${date.year}',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 }

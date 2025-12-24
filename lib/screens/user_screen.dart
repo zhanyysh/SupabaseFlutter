@@ -164,10 +164,10 @@ class _UserScreenState extends State<UserScreen> {
         height: 70,
         child: FloatingActionButton(
           onPressed: _showQrCode,
-          backgroundColor: Colors.amber, // Yellow color like in the screenshot
+          backgroundColor: const Color(0xFF40C4C6), // Ziroo color
           shape: const CircleBorder(),
           elevation: 4,
-          child: const Icon(Icons.qr_code_scanner, size: 36, color: Colors.black),
+          child: const Icon(Icons.qr_code, size: 36, color: Colors.white),
         ),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:go_router/go_router.dart';
 import '../map_screen.dart';
 
 class CompanyDetailsScreen extends StatefulWidget {
@@ -111,16 +112,44 @@ class _CompanyDetailsScreenState extends State<CompanyDetailsScreen> {
   }
 
   void _openMap({double? lat, double? lng}) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder:
-            (_) => MapScreen(
-              initialLocation:
-                  lat != null && lng != null ? LatLng(lat, lng) : null,
-            ),
-      ),
-    );
+    // Используем go_router для перехода на карту
+    // Но так как карта находится в другой ветке (branch), 
+    // нам нужно переключиться на нее.
+    // В go_router это делается через go('/map').
+    // Однако, мы хотим передать параметры (координаты).
+    // ShellRoute не поддерживает передачу сложных объектов между ветками так просто.
+    // Но мы можем передать query parameters.
+    
+    if (lat != null && lng != null) {
+      // Если есть координаты, открываем карту как отдельный экран (не в табе),
+      // или переходим на таб карты.
+      // Вариант 1: Переход на таб карты (но тогда нужно научить MapScreen читать query params)
+      // Вариант 2: Открыть карту поверх всего (как модалку или новый экран)
+      
+      // Давайте используем push, чтобы открыть карту поверх текущего экрана,
+      // так как пользователь хочет просто посмотреть где это, а не уйти с концами на вкладку карты.
+      // Для этого нам нужен роут в router.dart, который не является частью ShellRoute,
+      // или просто использовать Navigator.push (что допустимо для модальных сценариев),
+      // но раз мы переходим на go_router, давайте сделаем красиво.
+      
+      // Я добавлю '/map-view' в router.dart позже, а пока используем push
+      // на существующий '/map', но это переключит вкладку.
+      
+      // Лучшее решение сейчас: использовать Navigator.push для открытия карты "посмотреть",
+      // так как это временное действие.
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder:
+              (_) => MapScreen(
+                initialLocation: LatLng(lat, lng),
+              ),
+        ),
+      );
+    } else {
+      // Если просто открыть карту - переключаем вкладку
+      context.go('/map');
+    }
   }
 
   @override
